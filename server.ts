@@ -24,9 +24,14 @@ app.use((req, res, next) => {
 
 // 1. Auth & Shop Registry Endpoints
 app.get('/api/auth/sham-password', (req: Request, res: Response) => {
-  const data = dbController.getRawData();
-  const sham = data.shops.find(s => s.id === 'sham-sweets');
-  res.json({ password: sham?.password || 'SHAM-789' });
+  try {
+    const data = dbController.getRawData();
+    const sham = data && data.shops ? data.shops.find(s => s.id === 'sham-sweets') : null;
+    res.json({ password: sham?.password || 'ShamSweetsSecure2026!' });
+  } catch (err: any) {
+    console.error('[SERVER ERROR] Failed to fetch sham passcode:', err);
+    res.json({ password: 'ShamSweetsSecure2026!' });
+  }
 });
 
 app.post('/api/auth/login', (req: Request, res: Response) => {
@@ -635,6 +640,14 @@ app.get('/api/audit-logs', (req: Request, res: Response) => {
   const shopId = req.query.shopId as string || 'sham-sweets';
   const list = dbController.getRawData().auditLogs.filter(a => a.shopId === shopId);
   res.json(list.reverse());
+});
+
+// Resilient API Error Handling Middleware
+app.use('/api', (err: any, req: Request, res: Response, next: any) => {
+  console.error('[API ERROR SEVERE]', err);
+  res.status(500).json({
+    error: err.message || 'An unexpected internal server error occurred within the sweet shop services.',
+  });
 });
 
 // Vite / Static files handler

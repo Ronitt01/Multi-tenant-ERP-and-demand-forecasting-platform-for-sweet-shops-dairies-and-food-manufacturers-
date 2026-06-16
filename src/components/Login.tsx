@@ -30,13 +30,21 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   useEffect(() => {
     // Fetch live generated passcode for Sham Sweets
     fetch('/api/auth/sham-password')
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) {
+          throw new Error(`HTTP status ${r.status}`);
+        }
+        return r.json();
+      })
       .then(data => {
-        if (data.password) {
+        if (data && data.password) {
           setShamPassword(data.password);
         }
       })
-      .catch(err => console.error('Error fetching default passcode:', err));
+      .catch(err => {
+        console.warn('Error fetching default passcode, using fallback:', err.message || err);
+        // Fallback already prefilled to 'ShamSweetsSecure2026!'
+      });
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
