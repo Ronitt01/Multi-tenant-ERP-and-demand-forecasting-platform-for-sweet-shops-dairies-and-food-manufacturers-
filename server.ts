@@ -647,6 +647,8 @@ if (!isProduction) {
   }).then((vite) => {
     app.use(vite.middlewares);
     app.get('*', async (req, res, next) => {
+      // Diagnostic log
+      console.log(`[CATCH-ALL] Requested: ${req.method} ${req.originalUrl}`);
       if (req.originalUrl.startsWith('/api')) {
         return next();
       }
@@ -658,9 +660,11 @@ if (!isProduction) {
           template = await vite.transformIndexHtml(url, template);
           res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
         } else {
+          console.error(`[CATCH-ALL ERROR] index.html not found!`);
           res.status(404).send('index.html not found');
         }
       } catch (e: any) {
+        console.error(`[CATCH-ALL ERROR] Exception during ${req.originalUrl}:`, e);
         vite.ssrFixStacktrace(e);
         next(e);
       }
