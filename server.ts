@@ -1,5 +1,6 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response } from 'express';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { dbController } from './server/db';
 import { calculateDemandForecast, getAiForecastCommentary } from './server/prediction';
@@ -19,64 +20,52 @@ app.use((req, res, next) => {
   next();
 });
 
-// Async handler wrapper for cleaner error handling
-const asyncHandler = (fn: Function) => (req: Request, res: Response, next: NextFunction) =>
-  Promise.resolve(fn(req, res, next)).catch(next);
-
 // API Routes FIRST
 
 // 1. Auth & Shop Registry Endpoints
 app.get('/api/auth/sham-password', (req: Request, res: Response) => {
-  try {
-    const data = dbController.getRawData();
-    const sham = data.shops.find(s => s.id === 'sham-sweets');
-    res.json({ password: sham?.password || 'SHAM-789' });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message || 'Failed to fetch sham password.' });
-  }
+  const data = dbController.getRawData();
+  const sham = data.shops.find(s => s.id === 'sham-sweets');
+  res.json({ password: sham?.password || 'SHAM-789' });
 });
 
 app.post('/api/auth/login', (req: Request, res: Response) => {
-  try {
-    const { shopId, password, role } = req.body;
+  const { shopId, password, role } = req.body;
 
-    if (!shopId || !password || !role) {
-      res.status(400).json({ error: 'Shop ID or Owner Email, Password, and Role are required parameters.' });
-      return;
-    }
-
-    // Support login via either Shop ID or Owner Email
-    let shop;
-    if (shopId.includes('@')) {
-      shop = dbController.getShopByEmail(shopId);
-    } else {
-      shop = dbController.getShopById(shopId);
-    }
-
-    if (!shop) {
-      res.status(404).json({ error: 'Sweet Shop or Owner Email not found. Try registering your sweet shop first.' });
-      return;
-    }
-
-    if (shop.password !== password) {
-      res.status(401).json({ error: 'Invalid passcode or credential mismatch.' });
-      return;
-    }
-
-    // Create simple stateless session token
-    const token = `session_${shop.id}_${role}_${Date.now()}`;
-    res.json({
-      token,
-      shopId: shop.id,
-      shopName: shop.name,
-      role
-    });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message || 'Login authentication failed.' });
+  if (!shopId || !password || !role) {
+    res.status(400).json({ error: 'Shop ID or Owner Email, Password, and Role are required parameters.' });
+    return;
   }
+
+  // Support login via either Shop ID or Owner Email
+  let shop;
+  if (shopId.includes('@')) {
+    shop = dbController.getShopByEmail(shopId);
+  } else {
+    shop = dbController.getShopById(shopId);
+  }
+
+  if (!shop) {
+    res.status(404).json({ error: 'Sweet Shop or Owner Email not found. Try registering your sweet shop first.' });
+    return;
+  }
+
+  if (shop.password !== password) {
+    res.status(401).json({ error: 'Invalid passcode or credential mismatch.' });
+    return;
+  }
+
+  // Create simple stateless session token
+  const token = `session_${shop.id}_${role}_${Date.now()}`;
+  res.json({
+    token,
+    shopId: shop.id,
+    shopName: shop.name,
+    role
+  });
 });
 
-app.post('/api/auth/register', asyncHandler(async (req: Request, res: Response) => {
+app.post('/api/auth/register', async (req: Request, res: Response) => {
   const { name, shopName, ownerName, phoneNumber, mobileNumber, email, ownerEmail, address, gstNumber, password } = req.body;
 
   const finalShopName = name || shopName;
@@ -125,21 +114,17 @@ app.post('/api/auth/register', asyncHandler(async (req: Request, res: Response) 
     ownerName,
     ownerEmail: finalOwnerEmail
   });
-}));
+});
 
 // 2. Product Directory APIs
 app.get('/api/products', (req: Request, res: Response) => {
-  try {
-    const shopId = req.query.shopId as string || 'sham-sweets';
-    const data = dbController.getRawData();
-    const list = data.products.filter(p => p.shopId === shopId);
-    res.json(list);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message || 'Failed to fetch products.' });
-  }
+  const shopId = req.query.shopId as string || 'sham-sweets';
+  const data = dbController.getRawData();
+  const list = data.products.filter(p => p.shopId === shopId);
+  res.json(list);
 });
 
-app.post('/api/products', asyncHandler(async (req: Request, res: Response) => {
+app.post('/api/products', async (req: Request, res: Response) => {
   const { shopId, name, category, unit, sellingPrice, costPrice, shelfLifeDays, sku } = req.body;
 
   if (!shopId || !name || !category || !unit || !sellingPrice || !costPrice) {
@@ -166,21 +151,17 @@ app.post('/api/products', asyncHandler(async (req: Request, res: Response) => {
   await dbController.logAudit(shopId, 'Staff', 'Manager', 'CREATE_PRODUCT', 'Products', `Created product ${name}`);
 
   res.status(201).json(newProduct);
-}));
+});
 
 // 3. Raw Materials / Inventory Management
 app.get('/api/ingredients', (req: Request, res: Response) => {
-  try {
-    const shopId = req.query.shopId as string || 'sham-sweets';
-    const data = dbController.getRawData();
-    const list = data.ingredients.filter(i => i.shopId === shopId);
-    res.json(list);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message || 'Failed to fetch ingredients.' });
-  }
+  const shopId = req.query.shopId as string || 'sham-sweets';
+  const data = dbController.getRawData();
+  const list = data.ingredients.filter(i => i.shopId === shopId);
+  res.json(list);
 });
 
-app.post('/api/ingredients', asyncHandler(async (req: Request, res: Response) => {
+app.post('/api/ingredients', async (req: Request, res: Response) => {
   const { shopId, name, currentStock, unit, reorderPoint, expiryDate } = req.body;
 
   if (!shopId || !name || !unit || currentStock === undefined) {
@@ -205,9 +186,9 @@ app.post('/api/ingredients', asyncHandler(async (req: Request, res: Response) =>
   await dbController.logAudit(shopId, 'Staff', 'Manager', 'CREATE_MATERIAL', 'Inventory', `Created raw material ${name}`);
 
   res.status(201).json(newIngredient);
-}));
+});
 
-app.post('/api/ingredients/buy', asyncHandler(async (req: Request, res: Response) => {
+app.post('/api/ingredients/buy', async (req: Request, res: Response) => {
   const { shopId, ingredientId, supplierName, quantity, pricePerUnit, expiryDate } = req.body;
 
   if (!shopId || !ingredientId || !quantity || !pricePerUnit) {
@@ -227,6 +208,7 @@ app.post('/api/ingredients/buy', asyncHandler(async (req: Request, res: Response
   item.currentStock += Number(quantity);
 
   if (expiryDate) {
+    if (!item.batches) item.batches = [];
     item.batches.push({
       batchNumber: `B-${Date.now()}`,
       quantity: Number(quantity),
@@ -251,32 +233,24 @@ app.post('/api/ingredients/buy', asyncHandler(async (req: Request, res: Response
   await dbController.logAudit(shopId, 'Staff', 'Manager', 'BUY_MATERIAL', 'Inventory', `Purchased ${quantity} ${item.unit} of ${item.name}`);
 
   res.status(201).json({ purchaseLog, ingredient: item });
-}));
+});
 
 app.get('/api/purchases', (req: Request, res: Response) => {
-  try {
-    const shopId = req.query.shopId as string || 'sham-sweets';
-    const data = dbController.getRawData();
-    const list = data.purchases.filter(p => p.shopId === shopId);
-    res.json(list.reverse());
-  } catch (error: any) {
-    res.status(500).json({ error: error.message || 'Failed to fetch purchases.' });
-  }
+  const shopId = req.query.shopId as string || 'sham-sweets';
+  const data = dbController.getRawData();
+  const list = data.purchases.filter(p => p.shopId === shopId);
+  res.json(list.reverse());
 });
 
 // 4. Daily Production planning
 app.get('/api/production', (req: Request, res: Response) => {
-  try {
-    const shopId = req.query.shopId as string || 'sham-sweets';
-    const data = dbController.getRawData();
-    const list = data.productionLogs.filter(p => p.shopId === shopId);
-    res.json(list);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message || 'Failed to fetch production logs.' });
-  }
+  const shopId = req.query.shopId as string || 'sham-sweets';
+  const data = dbController.getRawData();
+  const list = data.productionLogs.filter(p => p.shopId === shopId);
+  res.json(list);
 });
 
-app.post('/api/production/plan', asyncHandler(async (req: Request, res: Response) => {
+app.post('/api/production/plan', async (req: Request, res: Response) => {
   const { shopId, productId, plannedQuantity, productionDate } = req.body;
 
   if (!shopId || !productId || !plannedQuantity) {
@@ -309,9 +283,9 @@ app.post('/api/production/plan', asyncHandler(async (req: Request, res: Response
   await dbController.logAudit(shopId, 'Staff', 'Production Staff', 'PLAN_PRODUCTION', 'Manufacturing', `Planned ${plannedQuantity} ${prod.unit} of ${prod.name}`);
 
   res.status(201).json(newLog);
-}));
+});
 
-app.post('/api/production/update', asyncHandler(async (req: Request, res: Response) => {
+app.post('/api/production/update', async (req: Request, res: Response) => {
   const { shopId, productionId, actualQuantity, status } = req.body;
 
   if (!shopId || !productionId || actualQuantity === undefined) {
@@ -343,20 +317,16 @@ app.post('/api/production/update', asyncHandler(async (req: Request, res: Respon
   await dbController.logAudit(shopId, 'Staff', 'Production Staff', 'EXECUTE_PRODUCTION', 'Manufacturing', `Updated production ${log.productName}: Completed ${actualQuantity}`);
 
   res.json(log);
-}));
+});
 
 // 5. Retail Sales checkout
 app.get('/api/retail-sales', (req: Request, res: Response) => {
-  try {
-    const shopId = req.query.shopId as string || 'sham-sweets';
-    const data = dbController.getRawData();
-    res.json(data.retailSales.filter(s => s.shopId === shopId).reverse());
-  } catch (error: any) {
-    res.status(500).json({ error: error.message || 'Failed to fetch retail sales.' });
-  }
+  const shopId = req.query.shopId as string || 'sham-sweets';
+  const data = dbController.getRawData();
+  res.json(data.retailSales.filter(s => s.shopId === shopId).reverse());
 });
 
-app.post('/api/retail-sales', asyncHandler(async (req: Request, res: Response) => {
+app.post('/api/retail-sales', async (req: Request, res: Response) => {
   const { shopId, items, salesType, paymentMethod } = req.body;
 
   if (!shopId || !items || !items.length) {
@@ -401,20 +371,16 @@ app.post('/api/retail-sales', asyncHandler(async (req: Request, res: Response) =
   await dbController.logAudit(shopId, 'Cashier', 'Cashier', 'RETAIL_SALE', 'Retail Sales', `Checked out ticket total ₹${totalAmount}`);
 
   res.status(201).json(newSale);
-}));
+});
 
 // 6. Bulk Customer directory
 app.get('/api/customers', (req: Request, res: Response) => {
-  try {
-    const shopId = req.query.shopId as string || 'sham-sweets';
-    const data = dbController.getRawData();
-    res.json(data.customers.filter(c => c.shopId === shopId));
-  } catch (error: any) {
-    res.status(500).json({ error: error.message || 'Failed to fetch customers.' });
-  }
+  const shopId = req.query.shopId as string || 'sham-sweets';
+  const data = dbController.getRawData();
+  res.json(data.customers.filter(c => c.shopId === shopId));
 });
 
-app.post('/api/customers', asyncHandler(async (req: Request, res: Response) => {
+app.post('/api/customers', async (req: Request, res: Response) => {
   const { shopId, restaurantName, contactPerson, phoneNumber, address, gstNumber, creditLimit, creditDays } = req.body;
 
   if (!shopId || !restaurantName || !phoneNumber) {
@@ -441,20 +407,16 @@ app.post('/api/customers', asyncHandler(async (req: Request, res: Response) => {
   await dbController.logAudit(shopId, 'Staff', 'Manager', 'CREATE_BULK_CUSTOMER', 'Partners', `Registered bulk client ${restaurantName}`);
 
   res.status(201).json(newCustomer);
-}));
+});
 
 // 7. Daily Supply entries and Delivery dispatch
 app.get('/api/supplies', (req: Request, res: Response) => {
-  try {
-    const shopId = req.query.shopId as string || 'sham-sweets';
-    const data = dbController.getRawData();
-    res.json(data.supplies.filter(s => s.shopId === shopId).reverse());
-  } catch (error: any) {
-    res.status(500).json({ error: error.message || 'Failed to fetch supplies.' });
-  }
+  const shopId = req.query.shopId as string || 'sham-sweets';
+  const data = dbController.getRawData();
+  res.json(data.supplies.filter(s => s.shopId === shopId).reverse());
 });
 
-app.post('/api/supplies/deliver', asyncHandler(async (req: Request, res: Response) => {
+app.post('/api/supplies/deliver', async (req: Request, res: Response) => {
   const { shopId, customerId, assignedDeliveryBoy, items, notes } = req.body;
 
   if (!shopId || !customerId || !items || !items.length) {
@@ -524,24 +486,20 @@ app.post('/api/supplies/deliver', asyncHandler(async (req: Request, res: Respons
   await dbController.logAudit(shopId, 'Staff', 'Manager', 'BULK_DISPATCH', 'Supplies Ledger', `Dispatched consignment to ${customer.restaurantName} total ₹${deliveryTotal}`);
 
   res.status(201).json(newSupply);
-}));
+});
 
 // 8. Financial Accounts Dues Ledger & Payment entry
 app.get('/api/ledger', (req: Request, res: Response) => {
-  try {
-    const shopId = req.query.shopId as string || 'sham-sweets';
-    const customerId = req.query.customerId as string;
-    let list = dbController.getRawData().ledger.filter(l => l.shopId === shopId);
-    if (customerId) {
-      list = list.filter(l => l.customerId === customerId);
-    }
-    res.json(list.reverse()); // latest first
-  } catch (error: any) {
-    res.status(500).json({ error: error.message || 'Failed to fetch ledger.' });
+  const shopId = req.query.shopId as string || 'sham-sweets';
+  const customerId = req.query.customerId as string;
+  let list = dbController.getRawData().ledger.filter(l => l.shopId === shopId);
+  if (customerId) {
+    list = list.filter(l => l.customerId === customerId);
   }
+  res.json(list.reverse()); // latest first
 });
 
-app.post('/api/ledger/payment', asyncHandler(async (req: Request, res: Response) => {
+app.post('/api/ledger/payment', async (req: Request, res: Response) => {
   const { shopId, customerId, amount, paymentMethod, description } = req.body;
 
   if (!shopId || !customerId || !amount) {
@@ -579,19 +537,15 @@ app.post('/api/ledger/payment', asyncHandler(async (req: Request, res: Response)
   await dbController.logAudit(shopId, 'Cashier', 'Cashier', 'RECEIVE_PAYMENT', 'Supplies Ledger', `Processed receipts of ₹${amount} from ${customer.restaurantName}`);
 
   res.status(201).json(newLedgerEntry);
-}));
+});
 
 // 9. Wastage Tracker Log
 app.get('/api/wastage', (req: Request, res: Response) => {
-  try {
-    const shopId = req.query.shopId as string || 'sham-sweets';
-    res.json(dbController.getRawData().wasteLogs.filter(w => w.shopId === shopId).reverse());
-  } catch (error: any) {
-    res.status(500).json({ error: error.message || 'Failed to fetch wastage logs.' });
-  }
+  const shopId = req.query.shopId as string || 'sham-sweets';
+  res.json(dbController.getRawData().wasteLogs.filter(w => w.shopId === shopId).reverse());
 });
 
-app.post('/api/wastage', asyncHandler(async (req: Request, res: Response) => {
+app.post('/api/wastage', async (req: Request, res: Response) => {
   const { shopId, targetId, targetName, type, quantity, unit, wastageCost, reason } = req.body;
 
   if (!shopId || !targetId || !targetName || !type || !quantity || !wastageCost || !reason) {
@@ -627,27 +581,23 @@ app.post('/api/wastage', asyncHandler(async (req: Request, res: Response) => {
   await dbController.logAudit(shopId, 'Staff', 'Manager', 'LOG_WASTE', 'Wastage', `Logged waste for ${targetName} of cost ₹${wastageCost}`);
 
   res.status(201).json(newWaste);
-}));
+});
 
 // 10. Forecast Calculation API
 app.get('/api/forecast', (req: Request, res: Response) => {
-  try {
-    const shopId = req.query.shopId as string || 'sham-sweets';
-    const queryDate = req.query.date as string || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const shopId = req.query.shopId as string || 'sham-sweets';
+  const queryDate = req.query.date as string || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-    try {
-      const report = calculateDemandForecast(shopId, queryDate);
-      res.json(report);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Forecast compilation error.' });
-    }
-  } catch (error: any) {
-    res.status(500).json({ error: error.message || 'Failed to fetch forecast.' });
+  try {
+    const report = calculateDemandForecast(shopId, queryDate);
+    res.json(report);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Forecast compilation error.' });
   }
 });
 
 // Deep Gemini commentary for Prediction System
-app.post('/api/forecast/commentary', asyncHandler(async (req: Request, res: Response) => {
+app.post('/api/forecast/commentary', async (req: Request, res: Response) => {
   const { shopId, report } = req.body;
 
   if (!shopId || !report) {
@@ -655,12 +605,16 @@ app.post('/api/forecast/commentary', asyncHandler(async (req: Request, res: Resp
     return;
   }
 
-  const commentary = await getAiForecastCommentary(shopId, report);
-  res.json({ commentary });
-}));
+  try {
+    const commentary = await getAiForecastCommentary(shopId, report);
+    res.json({ commentary });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'AI API query failure.' });
+  }
+});
 
 // 11. Conversational AI Business Assistant
-app.post('/api/ai-assistant', asyncHandler(async (req: Request, res: Response) => {
+app.post('/api/ai-assistant', async (req: Request, res: Response) => {
   const { shopId, query } = req.body;
 
   if (!shopId || !query) {
@@ -668,31 +622,19 @@ app.post('/api/ai-assistant', asyncHandler(async (req: Request, res: Response) =
     return;
   }
 
-  const answer = await askAiAssistant(shopId, query);
-  res.json({ answer });
-}));
-
-// 12. Audit Trail System
-app.get('/api/audit-logs', (req: Request, res: Response) => {
   try {
-    const shopId = req.query.shopId as string || 'sham-sweets';
-    const list = dbController.getRawData().auditLogs.filter(a => a.shopId === shopId);
-    res.json(list.reverse());
+    const answer = await askAiAssistant(shopId, query);
+    res.json({ answer });
   } catch (error: any) {
-    res.status(500).json({ error: error.message || 'Failed to fetch audit logs.' });
+    res.status(500).json({ error: error.message || 'Conversational context failure.' });
   }
 });
 
-// Global error handler middleware (MUST be after all routes)
-app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-  console.error('[ERROR]', err);
-  const statusCode = err.status || 500;
-  const isDevelopment = process.env.NODE_ENV === 'development';
-  
-  res.status(statusCode).json({
-    error: err.message || 'Internal server error.',
-    details: isDevelopment ? err.stack : undefined
-  });
+// 12. Audit Trail System
+app.get('/api/audit-logs', (req: Request, res: Response) => {
+  const shopId = req.query.shopId as string || 'sham-sweets';
+  const list = dbController.getRawData().auditLogs.filter(a => a.shopId === shopId);
+  res.json(list.reverse());
 });
 
 // Vite / Static files handler
@@ -704,12 +646,23 @@ if (!isProduction) {
     appType: 'spa',
   }).then((vite) => {
     app.use(vite.middlewares);
-    app.use('*', (req, res, next) => {
-      // Direct catch-all route for frontend SPA fallback
+    app.get('*', async (req, res, next) => {
       if (req.originalUrl.startsWith('/api')) {
-        next();
-      } else {
-        vite.middlewares(req, res, next);
+        return next();
+      }
+      try {
+        const url = req.originalUrl;
+        const indexHtmlPath = path.resolve(process.cwd(), 'index.html');
+        if (fs.existsSync(indexHtmlPath)) {
+          let template = fs.readFileSync(indexHtmlPath, 'utf-8');
+          template = await vite.transformIndexHtml(url, template);
+          res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+        } else {
+          res.status(404).send('index.html not found');
+        }
+      } catch (e: any) {
+        vite.ssrFixStacktrace(e);
+        next(e);
       }
     });
   });

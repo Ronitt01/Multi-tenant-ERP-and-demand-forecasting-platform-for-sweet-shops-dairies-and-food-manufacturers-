@@ -5,6 +5,7 @@ import {
   RetailSale, BulkCustomer, DailySupply, LedgerEntry, WasteLog, AuditLog,
   SaleItem, SupplyItem
 } from '../src/types';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 const DB_DIR_DEFAULT = path.join(process.cwd(), 'data');
 const DB_FILE_DEFAULT = path.join(DB_DIR_DEFAULT, 'db.json');
@@ -51,6 +52,83 @@ interface ErpDatabase {
   auditLogs: AuditLog[];
 }
 
+// In-Memory state cache to ensure instant reads and avoid file I/O delays or serverless file ephemerality losses
+let cachedDbState: ErpDatabase | null = null;
+let supabaseClient: SupabaseClient | null = null;
+
+function getSupabase(): SupabaseClient | null {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_ANON_KEY;
+  if (url && key && url !== 'YOUR_SUPABASE_URL' && key !== 'YOUR_SUPABASE_ANON_KEY') {
+    if (!supabaseClient) {
+      supabaseClient = createClient(url, key);
+    }
+    return supabaseClient;
+  }
+  return null;
+}
+
+// Global hook to back up database asynchronously to Supabase cloud table
+async function syncToSupabase(data: ErpDatabase, shopId: string = 'sham-sweets') {
+  const supabase = getSupabase();
+  if (!supabase) return;
+  try {
+    const { error } = await supabase
+      .from('erp_database')
+      .upsert({
+        shop_id: shopId,
+        data: data,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'shop_id' });
+    
+    if (error) {
+      console.error('[SUPABASE] Cloud Sync failed (Make sure table "erp_database" exists with text "shop_id" pk & jsonb "data" column):', error.message);
+    } else {
+      console.log('[SUPABASE] Database state successfully backed up to Supabase cloud.');
+    }
+  } catch (err) {
+    console.error('[SUPABASE] Connection failed to propagate upsert:', err);
+  }
+}
+
+// Global hook to pull database asynchronously from Supabase cloud table
+async function syncFromSupabase(shopId: string = 'sham-sweets'): Promise<ErpDatabase | null> {
+  const supabase = getSupabase();
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('erp_database')
+      .select('data')
+      .eq('shop_id', shopId)
+      .single();
+    if (error) {
+      console.warn('[SUPABASE] No cloud record available (will seed on next write operation):', error.message);
+      return null;
+    }
+    if (data && data.data) {
+      console.log('[SUPABASE] Memory cache successfully hydrated from cloud Supabase.');
+      return data.data as ErpDatabase;
+    }
+  } catch (err) {
+    console.error('[SUPABASE] Hydration lookup failed:', err);
+  }
+  return null;
+}
+
+// Async hydration trigger on startup
+(async () => {
+  const sbData = await syncFromSupabase();
+  if (sbData) {
+    cachedDbState = sbData;
+    // Also backup locally to provide high performance local file backup
+    try {
+      fs.writeFileSync(DB_FILE, JSON.stringify(sbData, null, 2), 'utf8');
+    } catch (e) {
+      console.error('[DATABASE] Failed to write fallback cache file:', e);
+    }
+  }
+})();
+
 // Thread-safe lock mimicking ACID transaction
 let isWriting = false;
 const queue: (() => Promise<void>)[] = [];
@@ -72,6 +150,8 @@ async function processQueue() {
 }
 
 function writeDbSafely(data: ErpDatabase): Promise<void> {
+  cachedDbState = data; // update memory cache immediately
+  
   return new Promise((resolve, reject) => {
     const task = async () => {
       try {
@@ -81,6 +161,10 @@ function writeDbSafely(data: ErpDatabase): Promise<void> {
         const tempPath = DB_FILE + '.tmp';
         fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
         fs.renameSync(tempPath, DB_FILE);
+        
+        // Backup to Supabase asynchronously in background so we don't block main request loop
+        syncToSupabase(data);
+
         resolve();
       } catch (err) {
         reject(err);
@@ -92,14 +176,31 @@ function writeDbSafely(data: ErpDatabase): Promise<void> {
 }
 
 function readDb(): ErpDatabase {
+  if (cachedDbState) {
+    return cachedDbState;
+  }
+
   try {
     if (fs.existsSync(DB_FILE)) {
       const content = fs.readFileSync(DB_FILE, 'utf8');
       const db: ErpDatabase = JSON.parse(content);
       
+      // Auto-heal collections to absolutely prevent 500 TypeError errors
+      if (!db.shops) db.shops = [];
+      if (!db.products) db.products = [];
+      if (!db.ingredients) db.ingredients = [];
+      if (!db.purchases) db.purchases = [];
+      if (!db.productionLogs) db.productionLogs = [];
+      if (!db.retailSales) db.retailSales = [];
+      if (!db.customers) db.customers = [];
+      if (!db.supplies) db.supplies = [];
+      if (!db.ledger) db.ledger = [];
+      if (!db.wasteLogs) db.wasteLogs = [];
+      if (!db.auditLogs) db.auditLogs = [];
+
       // Auto-heal legacy db.json file to make sure the sham-sweets owner details exist
       let updated = false;
-      if (db && Array.isArray(db.shops)) {
+      if (db.shops) {
         const sham = db.shops.find(s => s.id === 'sham-sweets');
         if (sham) {
           if (!sham.ownerEmail || sham.ownerEmail !== 'admin@shamsweets.com' || sham.password !== 'ShamSweetsSecure2026!' || !sham.ownerName) {
@@ -128,12 +229,16 @@ function readDb(): ErpDatabase {
         fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf8');
       }
 
+      cachedDbState = db;
       return db;
     }
   } catch (e) {
     console.error('Error reading database file:', e);
   }
-  return initializeDb();
+  
+  const initial = initializeDb();
+  cachedDbState = initial;
+  return initial;
 }
 
 function initializeDb(): ErpDatabase {

@@ -13,7 +13,12 @@ import {
 } from 'lucide-react';
 
 export default function App() {
-  const [session, setSession] = useState<UserSession | null>(null);
+  const [session, setSession] = useState<UserSession | null>({
+    token: 'sham-token-bypass',
+    shopId: 'sham-sweets',
+    shopName: 'Sham Sweets',
+    role: 'Owner'
+  });
   
   // Active Tab state
   const [activeTab, setActiveTab] = useState<'dashboard' | 'forecast' | 'inventory' | 'production' | 'pos' | 'delivery'>('dashboard');

@@ -123,7 +123,8 @@ export function calculateDemandForecast(shopId: string, targetDateStr: string): 
     relevantSales.forEach((sale) => {
       const saleDate = new Date(sale.date);
       if (saleDate.getDay() === targetDayOfWeek) {
-        const item = sale.items.find(i => i.productId === prod.id);
+        const itemsList = sale.items || [];
+        const item = itemsList.find(i => i.productId === prod.id);
         if (item) {
           dayMatchingRetailQtys.push(item.quantity);
         }
@@ -139,7 +140,8 @@ export function calculateDemandForecast(shopId: string, targetDateStr: string): 
     let dailyWholesaleCommit = 0;
     const supplyCounts: Record<string, number> = {};
     relevantSupplies.forEach((ship) => {
-      const shipItem = ship.items.find(i => i.productId === prod.id);
+      const itemsList = ship.items || [];
+      const shipItem = itemsList.find(i => i.productId === prod.id);
       if (shipItem) {
         supplyCounts[ship.date] = (supplyCounts[ship.date] || 0) + shipItem.quantity;
       }
