@@ -10,7 +10,40 @@ import { Shop } from './src/types';
 const app = express();
 const PORT = 3000;
 
+// Set up persistent log auditing
+const AUDIT_LOG_FILE = path.join(process.cwd(), 'data', 'server_audit.log');
+try {
+  fs.mkdirSync(path.dirname(AUDIT_LOG_FILE), { recursive: true });
+} catch (e) {}
+
+// Log all process level failures to disk
+process.on('uncaughtException', (err: any) => {
+  const msg = `[UNCAUGHT EXCEPTION] ${new Date().toISOString()} - ${err?.stack || err}\n`;
+  try { fs.appendFileSync(AUDIT_LOG_FILE, msg, 'utf8'); } catch (_) {}
+  console.error('UNCAUGHT EXCEPTION', err);
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  const msg = `[UNHANDLED REJECTION] ${new Date().toISOString()} - ${reason?.stack || reason}\n`;
+  try { fs.appendFileSync(AUDIT_LOG_FILE, msg, 'utf8'); } catch (_) {}
+  console.error('UNHANDLED REJECTION', reason);
+});
+
 app.use(express.json());
+
+// Global HTTP log listener
+app.use((req, res, next) => {
+  const start = Date.now();
+  const reqInfo = `[REQ] ${new Date().toISOString()} - ${req.method} ${req.url} - Headers: ${JSON.stringify(req.headers)}\n`;
+  try { fs.appendFileSync(AUDIT_LOG_FILE, reqInfo, 'utf8'); } catch (_) {}
+
+  res.on('finish', () => {
+    const elapsed = Date.now() - start;
+    const resInfo = `[RES] ${new Date().toISOString()} - ${req.method} ${req.url} -> STATUS: ${res.statusCode} (${elapsed}ms)\n`;
+    try { fs.appendFileSync(AUDIT_LOG_FILE, resInfo, 'utf8'); } catch (_) {}
+  });
+  next();
+});
 
 // Logger middleware for audit tracking
 app.use((req, res, next) => {
