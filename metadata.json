@@ -1,0 +1,6 @@
+{
+  "name": "Sham Sweets ERP",
+  "description": "Production-grade ERP, ledger tracking, and AI-driven demand forecasting system for sweet shops and dairy manufacturers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
