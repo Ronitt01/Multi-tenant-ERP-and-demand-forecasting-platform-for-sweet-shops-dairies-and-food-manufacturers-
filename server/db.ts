@@ -6,8 +6,36 @@ import {
   SaleItem, SupplyItem
 } from '../src/types';
 
-const DB_DIR = path.join(process.cwd(), 'data');
-const DB_FILE = path.join(DB_DIR, 'db.json');
+const DB_DIR_DEFAULT = path.join(process.cwd(), 'data');
+const DB_FILE_DEFAULT = path.join(DB_DIR_DEFAULT, 'db.json');
+
+let DB_DIR = DB_DIR_DEFAULT;
+let DB_FILE = DB_FILE_DEFAULT;
+
+// Under serverless environment (e.g. Vercel), copy seed database to writeable /tmp/db.json
+if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+  const tmpDir = '/tmp';
+  const tmpFile = path.join(tmpDir, 'db.json');
+  try {
+    if (!fs.existsSync(tmpFile)) {
+      if (fs.existsSync(DB_FILE_DEFAULT)) {
+        // Ensure /tmp directory exists
+        if (!fs.existsSync(tmpDir)) {
+          fs.mkdirSync(tmpDir, { recursive: true });
+        }
+        fs.copyFileSync(DB_FILE_DEFAULT, tmpFile);
+        console.log(`[DATABASE] Seed database successfully copied to writable path: ${tmpFile}`);
+      } else {
+        console.warn(`[DATABASE] Default seed file not found at: ${DB_FILE_DEFAULT}`);
+      }
+    }
+    DB_DIR = tmpDir;
+    DB_FILE = tmpFile;
+    console.log(`[DATABASE] Serverless/Production environment fallback set to: ${DB_FILE}`);
+  } catch (err) {
+    console.warn(`[DATABASE] Failed to initialize writeable fallback path:`, err);
+  }
+}
 
 interface ErpDatabase {
   shops: Shop[];
